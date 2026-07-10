@@ -46,6 +46,8 @@ with col2:
 # Process TXT Gamma logs
 gamma_data_map = {}
 if uploaded_txt_gamma:
+    # Shows just once when files are dropped in, rather than on every rerun
+    st.toast(f"📚 Syncing {len(uploaded_txt_gamma)} Gamma TXT log files...")
     for txt_file in uploaded_txt_gamma:
         try:
             # Read space or tab-separated text columns (assuming Column 0 = Depth, Column 1 = Gamma)
@@ -57,7 +59,6 @@ if uploaded_txt_gamma:
             # Create a lookup key based on the filename prefix (e.g., Ld32-18)
             prefix = txt_file.name.split('.')[0].upper()
             gamma_data_map[prefix] = g_df
-            st.toast(f"✅ Loaded Gamma TXT for {txt_file.name}")
         except Exception as e:
             st.error(f"Error parsing TXT Gamma file {txt_file.name}: {e}")
 
