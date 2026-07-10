@@ -46,7 +46,6 @@ with col2:
 # Process TXT Gamma logs
 gamma_data_map = {}
 if uploaded_txt_gamma:
-    # Shows just once when files are dropped in, rather than on every rerun
     st.toast(f"📚 Syncing {len(uploaded_txt_gamma)} Gamma TXT log files...")
     for txt_file in uploaded_txt_gamma:
         try:
@@ -93,11 +92,6 @@ if uploaded_files:
     st.sidebar.markdown("---")
     st.sidebar.subheader("✂️ Core Data Pruning")
     
-    trim_first_reading = st.sidebar.checkbox("Remove first reading from every core", value=False)
-    if trim_first_reading:
-        df_raw = df_raw.sort_values(by=['Source_File', 'Depth_Value'])
-        df_raw = df_raw.groupby('Source_File', as_index=False).tail(-1).reset_index(drop=True)
-
     manual_exclude_input = st.sidebar.text_input("Exclude Depths (e.g., 10.5, 40-45):", value="")
     if manual_exclude_input.strip():
         try:
