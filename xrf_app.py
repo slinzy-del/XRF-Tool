@@ -49,13 +49,8 @@ if uploaded_txt_gamma:
     st.toast(f"📚 Syncing {len(uploaded_txt_gamma)} Gamma TXT log files...")
     for txt_file in uploaded_txt_gamma:
         try:
-            # Read space or tab-separated text columns (assuming Column 0 = Depth, Column 1 = Gamma)
             g_df = pd.read_csv(txt_file, sep=r'\s+', engine='python', skiprows=1, header=None, usecols=[0, 1], names=['Depth', 'Gamma'])
-            
-            # Clean out common invalid tool errors (like massive negative placeholders)
             g_df = g_df[g_df['Gamma'] > -500].dropna().copy()
-            
-            # Create a lookup key based on the filename prefix (e.g., Ld32-18)
             prefix = txt_file.name.split('.')[0].upper()
             gamma_data_map[prefix] = g_df
         except Exception as e:
@@ -65,22 +60,58 @@ if uploaded_files:
     all_data = []
     for file in uploaded_files:
         temp_df = pd.read_csv(file)
+        
+        # Standardize column naming to ensure ratios don't break due to case sensitivity
+        temp_df.columns = [c.strip() for c in temp_df.columns]
+        
         temp_df = temp_df.assign(
             Source_File=str(file.name),
             Sample_ID=temp_df['Sample'].astype(str),
             Depth_Value=pd.to_numeric(temp_df['Sample'], errors='coerce')
         )
         
+        # Helper to convert columns cleanly to numeric values
+        def to_num(col_name):
+            match = next((c for c in temp_df.columns if c.upper() == col_name.upper()), None)
+            return pd.to_numeric(temp_df[match], errors='coerce') if match else None
+
+        # --- DYNAMIC CROSS-FORMATION RATIOS ---
+        K_val = to_num('K')
+        Ca_val = to_num('Ca')
+        
+        Fe_val = to_num('Fe')
+        if Fe_val is None:
+            Fe_val = to_num('Iron')
+            
+        Cr_val = to_num('Cr')
+        if Cr_val is None:
+            Cr_val = to_num('Chromium')
+        
+        Zr_val = to_num('Zr')
+        if Zr_val is None:
+            Zr_val = to_num('Zirconium')
+            
+        Sr_val = to_num('Sr')
+        if Sr_val is None:
+            Sr_val = to_num('Strontium')
+
+        # Compute safe ratios (handling divide-by-zero gracefully)
+        if K_val is not None and Zr_val is not None:
+            temp_df['Ratio_K_Zr'] = (K_val / Zr_val.replace(0, np.nan)).fillna(0)
+        if Ca_val is not None and Fe_val is not None:
+            temp_df['Ratio_Ca_Fe'] = (Ca_val / Fe_val.replace(0, np.nan)).fillna(0)
+        if Sr_val is not None and Cr_val is not None:
+            temp_df['Ratio_Sr_Cr'] = (Sr_val / Cr_val.replace(0, np.nan)).fillna(0)
+
         # Match XRF depth values to the continuous Gamma TXT curve
         file_prefix = file.name.split('.')[0].upper()
         matched_key = next((k for k in gamma_data_map if k in file_prefix or file_prefix in k), None)
         
         if matched_key:
             g_log = gamma_data_map[matched_key]
-            # Perform linear interpolation to link continuous Gamma measurements directly to XRF intervals
             temp_df['Gamma_API'] = np.interp(temp_df['Depth_Value'], g_log['Depth'], g_log['Gamma'])
         else:
-            temp_df['Gamma_API'] = 0.0  # Safe default if no matching log is uploaded
+            temp_df['Gamma_API'] = 0.0
 
         all_data.append(temp_df)
     
@@ -117,25 +148,28 @@ if uploaded_files:
     elements = [c for c in df_raw.columns if not any(k.upper() in c.upper() for k in meta) 
                 and "2-Sigma" not in c and "Unnamed" not in c]
     
-    # 🛡️ SAFETY CHECK: Only append Gamma track to features if a valid TXT file was uploaded
     if len(gamma_data_map) > 0 and 'Gamma_API' in df_raw.columns:
         elements = sorted(list(set(elements + ['Gamma_API'])))
     elif 'Gamma_API' in elements:
         elements.remove('Gamma_API')
 
-    # Simplified text prompt above the multi-select input box
     st.sidebar.subheader("Select Features:")
+    
+    # --- ALL THREE CROSS-FORMATION RATIOS PRE-LOADED ---
+    starting_features = ['Al', 'Ca', 'Fe', 'K', 'Zr', 'Ratio_K_Zr', 'Ratio_Ca_Fe', 'Ratio_Sr_Cr']
+    
     selected_elements = st.sidebar.multiselect(
-        "",  # Kept empty since subheader handles the title cleanly now
+        "", 
         elements, 
-        default=[e for e in ['Al', 'Si', 'K', 'Ca', 'Fe', 'Zr', 'Gamma_API'] if e in elements]
+        default=[e for e in starting_features if e in elements]
     )
 
     if len(selected_elements) >= 3:
         X_num = df_raw[selected_elements].apply(pd.to_numeric, errors='coerce').fillna(0).copy()
         
+        # --- ROBUST IQR DATA SCRUBBING ---
         st.sidebar.subheader("🧼 Data Cleaning")
-        outlier_sigma = st.sidebar.slider("Outlier Scrub (Z-Score):", 1.0, 15.0, 10.0)
+        outlier_multiplier = st.sidebar.slider("Outlier Scrub (IQR Multiplier):", 1.5, 10.0, 4.0)
         
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_num)
@@ -143,10 +177,20 @@ if uploaded_files:
         pca_obj = PCA(n_components=3, random_state=42)
         pca_scores = pca_obj.fit_transform(X_scaled)
         
-        mask = np.abs((pca_scores[:,0] - np.mean(pca_scores[:,0])) / np.std(pca_scores[:,0])) < outlier_sigma
+        # Calculate bounds along the dominant PC1 axis using robust median & IQR
+        pc1_scores = pca_scores[:, 0]
+        q25, q75 = np.percentile(pc1_scores, [25, 75])
+        iqr = q75 - q25
+        
+        lower_bound = q25 - (outlier_multiplier * iqr)
+        upper_bound = q75 + (outlier_multiplier * iqr)
+        
+        mask = (pc1_scores >= lower_bound) & (pc1_scores <= upper_bound)
+        
         df = df_raw.loc[mask].copy() 
         final_pca_scores = pca_scores[mask]
         df[['PC1', 'PC2', 'PC3']] = final_pca_scores
+        # ---------------------------------
 
         formation_options = ["Unassigned", "Beaver Dam", "Choptank", "Calvert"]
 
