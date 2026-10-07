@@ -1,8 +1,3 @@
-Here is the complete, updated xrf_app.py.
-
-It lists all available numeric columns in your sidebar dropdown, but pre-selects only the columns that contain real, varying data by default. This eliminates all the blank NaN gaps in your correlation heatmap and PCA on startup, while still giving you complete freedom to toggle any element on or off manually.
-
-Python
 import streamlit as st
 import pandas as pd
 import numpy as np
