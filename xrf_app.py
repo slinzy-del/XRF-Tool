@@ -150,18 +150,23 @@ if uploaded_files:
         except ValueError:
             st.sidebar.error("Check format! Examples: 12.4 or 40-45")
 
-    # Metadata columns to exclude from element dropdown
-    meta_cols = {'Source_File', 'Sample_ID', 'Depth_Value', 'Gamma_API'}
-    numeric_cols = [
-        c for c in df_raw.select_dtypes(include=[np.number]).columns 
-        if c not in meta_cols
-    ]
+    meta = ['Reading', 'Type', 'Time', 'Sample', 'Units', 'Sigma', 'CPS', 'Mode', 'Duration', 
+            'Main', 'Low', 'High', 'Light', 'User', 'Batch', 'Heat', 'Lot', 'Note', 'Balance', 'Bal',
+            'Source_File', 'Sample_ID', 'Depth_Value', 'PC1', 'PC2', 'PC3', 'Cluster_ID', 'Display_Label']
+    
+    all_columns = [c for c in df_raw.columns if not any(k.upper() in c.upper() for k in meta) 
+                   and "2-Sigma" not in c and "Unnamed" not in c]
+    
+    if len(gamma_data_map) > 0 and 'Gamma_API' in df_raw.columns:
+        all_columns = sorted(list(set(all_columns + ['Gamma_API'])))
 
-    st.sidebar.subheader("Select Elements / Ratios:")
+    default_elements = [c for c in all_columns if not c.startswith('Ratio_')]
+
+    st.sidebar.subheader("Select Features:")
     selected_elements = st.sidebar.multiselect(
         "", 
-        options=numeric_cols, 
-        default=numeric_cols
+        options=all_columns, 
+        default=default_elements
     )
 
     # --- TRANSFORMATION PIPELINE ---
@@ -275,9 +280,6 @@ if uploaded_files:
                 xaxis=dict(tickangle=-45)
             )
             st.plotly_chart(fig_corr, use_container_width=True)
-
-    else:
-        st.warning("Please select at least 3 elements from the sidebar to perform PCA and clustering.")
 
 else:
     st.info("Please upload XRF CSV file(s) from the sidebar to begin analysis.")
