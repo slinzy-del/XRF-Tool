@@ -173,23 +173,23 @@ if uploaded_files:
     if len(selected_elements) >= 3:
         X_num = df_raw[selected_elements].apply(pd.to_numeric, errors='coerce').fillna(0).copy()
         
-        # 1. Log10(x + 1) transformation
+        # 1. Log10(x + 1) transformation (PAST Equivalent)
         if use_log10:
             X_log = np.log10(X_num + 1)
         else:
             X_log = X_num
 
-        # 2. Data Cleaning on Log-Transformed Space
+        # 2. Data Cleaning on Transformed Space
         st.sidebar.subheader("🧼 Data Cleaning")
         outlier_multiplier = st.sidebar.slider("Outlier Scrub (IQR Multiplier):", 1.5, 10.0, 4.0)
         
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_log)
         
-        pca_obj = PCA(n_components=3, random_state=42)
+        pca_obj = PCA(n_components=min(3, len(selected_elements)), random_state=42)
         pca_scores = pca_obj.fit_transform(X_scaled)
         
-        # Calculate bounds along PC1 axis
+        # Calculate bounds along PC1 axis for scrubbing
         pc1_scores = pca_scores[:, 0]
         q25, q75 = np.percentile(pc1_scores, [25, 75])
         iqr = q75 - q25
@@ -208,7 +208,9 @@ if uploaded_files:
         if app_mode == "Analysis & AI Training":
             num_clusters = st.sidebar.slider("Number of Formations:", 2, 5, 3)
             km = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
-            df['Cluster_ID'] = km.fit_predict(final_pca_scores).astype(str)
+            
+            # 🎯 FIX: Cluster directly on full feature matrix X_scaled[mask] (Exact PAST Parity)
+            df['Cluster_ID'] = km.fit_predict(X_scaled[mask]).astype(str)
             
             st.sidebar.subheader("Assign Formations")
             label_map = {c: st.sidebar.selectbox(f"Cluster {c}:", formation_options, key=f"l_{c}") for c in sorted(df['Cluster_ID'].unique())}
@@ -217,7 +219,7 @@ if uploaded_files:
             
             if st.sidebar.button("🧠 Train/Overwrite Master AI"):
                 model = RandomForestClassifier(n_estimators=250, random_state=42)
-                # Fit model on the log-transformed + scaled features
+                # Fit model on the full-variance scaled features
                 model.fit(X_scaled[mask], df['Display_Label'])
                 with open(model_path, "wb") as f:
                     pickle.dump((model, scaler, selected_elements, use_log10), f)
@@ -238,32 +240,50 @@ if uploaded_files:
                 st.sidebar.error("Train model first!")
                 st.stop()
 
-        # --- VISUALIZATION TABS ---
-        tab1, tab2, tab3 = st.tabs(["3D Space", "Element Drivers", "Stratigraphy"])
+        # --- 3-TAB DECOUPLED WORKFLOW ---
+        tab1, tab2, tab3 = st.tabs(["🌌 PCA Space & Drivers", "📉 Down-Core Stratigraphy", "🤖 Master AI Training"])
 
         with tab1:
-            st.plotly_chart(px.scatter_3d(
-                df, x='PC1', y='PC2', z='PC3', 
-                color='Display_Label', 
-                color_discrete_map=COLOR_DISCRETE_MAP,
-                height=800, template="plotly_dark"
-            ), use_container_width=True)
+            st.subheader("1. Principal Component Analysis (Diagnostic View)")
+            col_pca, col_loadings = st.columns([3, 2])
+            
+            with col_pca:
+                st.plotly_chart(px.scatter_3d(
+                    df, x='PC1', y='PC2', z='PC3', 
+                    color='Display_Label', 
+                    color_discrete_map=COLOR_DISCRETE_MAP,
+                    height=700, template="plotly_dark",
+                    title="3D PCA Score Space"
+                ), use_container_width=True)
+                
+            with col_loadings:
+                st.subheader("Element Drivers (Loadings)")
+                loadings = pd.DataFrame(pca_obj.components_.T, columns=['PC1', 'PC2', 'PC3'], index=selected_elements)
+                pc_choice = st.radio("Inspect Axis:", ["PC1", "PC2", "PC3"], horizontal=True)
+                st.plotly_chart(px.bar(
+                    loadings.reset_index(), x='index', y=pc_choice, color=pc_choice, 
+                    color_continuous_scale='RdBu_r', height=550
+                ), use_container_width=True)
 
         with tab2:
-            loadings = pd.DataFrame(pca_obj.components_.T, columns=['PC1', 'PC2', 'PC3'], index=selected_elements)
-            pc_choice = st.radio("Inspect Axis Drivers:", ["PC1", "PC2", "PC3"], horizontal=True)
-            st.plotly_chart(px.bar(loadings.reset_index(), x='index', y=pc_choice, color=pc_choice, 
-                                   color_continuous_scale='RdBu_r'), use_container_width=True)
-
-        with tab3:
+            st.subheader("2. Chemostratigraphic Core Log (Full Feature K-Means)")
             fig_strat = px.scatter(
                 df, x='Source_File', y='Depth_Value', 
                 color='Display_Label', 
                 color_discrete_map=COLOR_DISCRETE_MAP,
-                hover_data=['Sample_ID', 'Gamma_API'] if 'Gamma_API' in df.columns else ['Sample_ID'], height=800
+                hover_data=['Sample_ID', 'Gamma_API'] if 'Gamma_API' in df.columns else ['Sample_ID'], 
+                height=800
             )
             fig_strat.update_traces(marker=dict(size=14, line=dict(width=1, color='white')))
             fig_strat.update_yaxes(autorange="reversed", title="Depth (ft)")
             fig_strat.update_xaxes(type='category', title="Borehole ID")
             st.plotly_chart(fig_strat, use_container_width=True)
-            st.download_button("💾 Export CSV", df.to_csv(index=False), "xrf_strat_results.csv")
+            st.download_button("💾 Export Core Log CSV", df.to_csv(index=False), "xrf_strat_results.csv")
+
+        with tab3:
+            st.subheader("3. Master AI Status & Re-Training Summary")
+            st.write("Train your machine learning model on current verified labels to run auto-labeling on new, unclassified boreholes.")
+            st.dataframe(df[['Sample_ID', 'Depth_Value', 'Display_Label'] + selected_elements].head(20))
+
+else:
+    st.info("Please upload XRF CSV file(s) from the sidebar to begin analysis.")
