@@ -98,15 +98,21 @@ if uploaded_files:
             Depth_Value=pd.to_numeric(temp_df[sample_col], errors='coerce')
         )
         
-        def to_num(col_name):
-            match = next((c for c in temp_df.columns if c.upper() == col_name.upper()), None)
-            return pd.to_numeric(temp_df[match], errors='coerce') if match else None
+        # Safe helper function to get numeric series across alternative header names
+        def get_elem_series(possible_names):
+            for name in possible_names:
+                found = next((c for c in temp_df.columns if c.upper() == name.upper()), None)
+                if found is not None:
+                    return pd.to_numeric(temp_df[found], errors='coerce')
+            return None
 
         # Cross-Formation Ratios
-        K_val, Ca_val, Fe_val = to_num('K'), to_num('Ca'), to_num('Fe') or to_num('Iron')
-        Cr_val = to_num('Cr') or to_num('Chromium')
-        Zr_val = to_num('Zr') or to_num('Zirconium')
-        Sr_val = to_num('Sr') or to_num('Strontium')
+        K_val = get_elem_series(['K', 'Potassium'])
+        Ca_val = get_elem_series(['Ca', 'Calcium'])
+        Fe_val = get_elem_series(['Fe', 'Iron'])
+        Cr_val = get_elem_series(['Cr', 'Chromium'])
+        Zr_val = get_elem_series(['Zr', 'Zirconium'])
+        Sr_val = get_elem_series(['Sr', 'Strontium'])
 
         if K_val is not None and Zr_val is not None:
             temp_df['Ratio_K_Zr'] = (K_val / Zr_val.replace(0, np.nan)).fillna(0)
