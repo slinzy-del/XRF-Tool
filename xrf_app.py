@@ -98,7 +98,6 @@ if uploaded_files:
             Depth_Value=pd.to_numeric(temp_df[sample_col], errors='coerce')
         )
         
-        # Safe helper function to get numeric series across alternative header names
         def get_elem_series(possible_names):
             for name in possible_names:
                 found = next((c for c in temp_df.columns if c.upper() == name.upper()), None)
@@ -149,4 +148,149 @@ if uploaded_files:
                 else:
                     df_raw = df_raw[df_raw['Depth_Value'] != float(item)]
         except ValueError:
-            st.sidebar.error("
+            st.sidebar.error("Check format! Examples: 12.4 or 40-45")
+
+    meta = ['Reading', 'Type', 'Time', 'Sample', 'Units', 'Sigma', 'CPS', 'Mode', 'Duration', 
+            'Main', 'Low', 'High', 'Light', 'User', 'Batch', 'Heat', 'Lot', 'Note', 'Balance', 'Bal',
+            'Source_File', 'Sample_ID', 'Depth_Value', 'PC1', 'PC2', 'PC3', 'Cluster_ID', 'Display_Label']
+    
+    all_columns = [c for c in df_raw.columns if not any(k.upper() in c.upper() for k in meta) 
+                   and "2-Sigma" not in c and "Unnamed" not in c]
+    
+    if len(gamma_data_map) > 0 and 'Gamma_API' in df_raw.columns:
+        all_columns = sorted(list(set(all_columns + ['Gamma_API'])))
+
+    default_elements = [c for c in all_columns if not c.startswith('Ratio_')]
+
+    st.sidebar.subheader("Select Features:")
+    selected_elements = st.sidebar.multiselect(
+        "", 
+        options=all_columns, 
+        default=default_elements
+    )
+
+    # --- TRANSFORMATION PIPELINE ---
+    st.sidebar.subheader("🧪 Scaling Pipeline")
+    use_clr = st.sidebar.checkbox("Use CLR (Centered Log-Ratio)", value=True, help="Recommended for XRF compositional data.")
+    outlier_multiplier = st.sidebar.slider("Outlier Scrub (IQR Multiplier):", 1.5, 10.0, 4.0)
+
+    if len(selected_elements) >= 3:
+        X_num = df_raw[selected_elements].apply(pd.to_numeric, errors='coerce').fillna(0).copy()
+        
+        # 1. Transform Data
+        X_trans = apply_clr(X_num) if use_clr else np.log10(X_num + 1)
+
+        # 2. Estimate initial PC1 for Outlier Masking
+        temp_scaled = StandardScaler().fit_transform(X_trans)
+        temp_pc1 = PCA(n_components=1).fit_transform(temp_scaled)[:, 0]
+        q25, q75 = np.percentile(temp_pc1, [25, 75])
+        iqr = q75 - q25
+        mask = (temp_pc1 >= (q25 - outlier_multiplier * iqr)) & (temp_pc1 <= (q75 + outlier_multiplier * iqr))
+
+        # 3. Clean Dataset and Re-Fit Scaler/PCA
+        df = df_raw.loc[mask].copy()
+        X_final_trans = X_trans.loc[mask]
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_final_trans)
+
+        pca_obj = PCA(n_components=min(3, len(selected_elements)), random_state=42)
+        pca_scores = pca_obj.fit_transform(X_scaled)
+
+        df['PC1'] = pca_scores[:, 0]
+        df['PC2'] = pca_scores[:, 1]
+        if pca_scores.shape[1] > 2:
+            df['PC3'] = pca_scores[:, 2]
+
+        # --- K-MEANS CLUSTERING ---
+        num_clusters = st.sidebar.slider("Number of Formations/Clusters:", 2, 5, 3)
+        km = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
+        df['Cluster_ID'] = km.fit_predict(X_scaled).astype(str)
+
+        formation_options = ["Unassigned", "Beaver Dam", "Choptank", "Calvert"]
+        st.sidebar.subheader("Assign Formations")
+        label_map = {c: st.sidebar.selectbox(f"Cluster {c}:", formation_options, key=f"l_{c}") for c in sorted(df['Cluster_ID'].unique())}
+        df['Display_Label'] = df['Cluster_ID'].map(lambda x: label_map[x] if label_map[x] != "Unassigned" else f"Cluster {x}")
+
+        # --- TABS ---
+        tab1, tab2, tab3 = st.tabs(["🌌 PCA Space & Drivers", "📉 Down-Core Stratigraphy", "🔥 Geochemical Heatmaps"])
+
+        with tab1:
+            st.subheader("1. Principal Component Analysis (Diagnostic View)")
+            col_bip, col_loadings = st.columns([3, 2])
+            
+            with col_bip:
+                biplot_fig = create_pca_biplot(df, pca_obj, selected_elements, 'Display_Label')
+                st.plotly_chart(biplot_fig, use_container_width=True)
+
+            with col_loadings:
+                st.subheader("Element Drivers (Loadings)")
+                loadings_df = pd.DataFrame(
+                    pca_obj.components_.T, 
+                    columns=['PC1', 'PC2'] + (['PC3'] if pca_scores.shape[1] > 2 else []), 
+                    index=selected_elements
+                )
+                pc_choice = st.radio("Inspect Axis:", loadings_df.columns.tolist(), horizontal=True)
+                
+                fig_load = px.bar(
+                    loadings_df.reset_index(), x='index', y=pc_choice, color=pc_choice,
+                    color_continuous_scale='RdBu_r', height=500,
+                    labels={'index': 'Feature', pc_choice: 'Loading Value'}
+                )
+                st.plotly_chart(fig_load, use_container_width=True)
+
+        with tab2:
+            st.subheader("2. Chemostratigraphic Core Log")
+            fig_strat = px.scatter(
+                df, x='Source_File', y='Depth_Value',
+                color='Display_Label',
+                color_discrete_map=COLOR_DISCRETE_MAP,
+                hover_data=['Sample_ID', 'Gamma_API'] if 'Gamma_API' in df.columns else ['Sample_ID'],
+                height=800
+            )
+            fig_strat.update_traces(marker=dict(size=12, line=dict(width=1, color='white')))
+            fig_strat.update_yaxes(autorange="reversed", title="Depth (ft)")
+            fig_strat.update_xaxes(type='category', title="Borehole ID")
+            st.plotly_chart(fig_strat, use_container_width=True)
+            st.download_button("💾 Export Core Log CSV", df.to_csv(index=False), "xrf_strat_results.csv")
+
+        with tab3:
+            st.subheader("3. Geochemical Fingerprints & Element Correlations")
+            heatmap_mode = st.radio("Select Heatmap View:", ["Cluster Profiles (Median Z-Score)", "Element Correlation Matrix"], horizontal=True)
+
+            if heatmap_mode == "Cluster Profiles (Median Z-Score)":
+                X_z = pd.DataFrame(X_scaled, columns=selected_elements, index=df.index)
+                X_z['Cluster'] = df['Display_Label']
+                cluster_profile = X_z.groupby('Cluster').median()
+
+                fig_hm = px.imshow(
+                    cluster_profile,
+                    labels=dict(x="Element / Feature", y="Formation / Cluster", color="Standardized Score"),
+                    x=cluster_profile.columns,
+                    y=cluster_profile.index,
+                    color_continuous_scale="RdBu_r",
+                    aspect="auto",
+                    height=450,
+                    text_auto=".2f"
+                )
+                fig_hm.update_layout(title="Cluster Fingerprints (Red = Enriched, Blue = Depleted)")
+                st.plotly_chart(fig_hm, use_container_width=True)
+
+            else:
+                corr_matrix = df[selected_elements].apply(pd.to_numeric, errors='coerce').corr()
+                fig_corr = px.imshow(
+                    corr_matrix,
+                    labels=dict(color="Correlation"),
+                    x=corr_matrix.columns,
+                    y=corr_matrix.columns,
+                    color_continuous_scale="Viridis",
+                    zmin=-1, zmax=1,
+                    aspect="auto",
+                    height=600,
+                    text_auto=".2f"
+                )
+                fig_corr.update_layout(title="Multi-Element Pearson Correlation Matrix")
+                st.plotly_chart(fig_corr, use_container_width=True)
+
+else:
+    st.info("Please upload XRF CSV file(s) from the sidebar to begin analysis.")
