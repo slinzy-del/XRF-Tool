@@ -1,8 +1,3 @@
-Got it—reverting back to the working version prior to introducing the element symbol checks and auto-pruning.
-
-Here is the code restored to its previous state:
-
-Python
 import streamlit as st
 import pandas as pd
 import numpy as np
