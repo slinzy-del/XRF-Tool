@@ -1,6 +1,3 @@
-Here is the complete xrf_app.py script with all emojis removed and clean, professional labeling throughout:
-
-Python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -273,7 +270,6 @@ if uploaded_files:
             
             method_key = 'pearson' if "Pearson" in corr_method else 'spearman'
             
-            # Compute element-vs-element correlation matrix
             corr_matrix = df[selected_elements].apply(pd.to_numeric, errors='coerce').corr(method=method_key)
 
             fig_corr = px.imshow(
