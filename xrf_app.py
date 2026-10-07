@@ -61,13 +61,16 @@ if uploaded_files:
     for file in uploaded_files:
         temp_df = pd.read_csv(file)
         
-        # Standardize column naming to ensure ratios don't break due to case sensitivity
+        # Standardize column naming
         temp_df.columns = [c.strip() for c in temp_df.columns]
+        
+        # Flexible Depth / Sample column resolution
+        sample_col = next((c for c in temp_df.columns if c.upper() in ['SAMPLE', 'DEPTH (IN)', 'DEPTH', 'DEPTH_FT']), 'Sample')
         
         temp_df = temp_df.assign(
             Source_File=str(file.name),
-            Sample_ID=temp_df['Sample'].astype(str),
-            Depth_Value=pd.to_numeric(temp_df['Sample'], errors='coerce')
+            Sample_ID=temp_df[sample_col].astype(str),
+            Depth_Value=pd.to_numeric(temp_df[sample_col], errors='coerce')
         )
         
         # Helper to convert columns cleanly to numeric values
@@ -95,7 +98,7 @@ if uploaded_files:
         if Sr_val is None:
             Sr_val = to_num('Strontium')
 
-        # Compute safe ratios (handling divide-by-zero gracefully)
+        # Compute safe ratios
         if K_val is not None and Zr_val is not None:
             temp_df['Ratio_K_Zr'] = (K_val / Zr_val.replace(0, np.nan)).fillna(0)
         if Ca_val is not None and Fe_val is not None:
@@ -103,7 +106,7 @@ if uploaded_files:
         if Sr_val is not None and Cr_val is not None:
             temp_df['Ratio_Sr_Cr'] = (Sr_val / Cr_val.replace(0, np.nan)).fillna(0)
 
-        # Match XRF depth values to the continuous Gamma TXT curve
+        # Match XRF depth values to continuous Gamma curve
         file_prefix = file.name.split('.')[0].upper()
         matched_key = next((k for k in gamma_data_map if k in file_prefix or file_prefix in k), None)
         
@@ -138,9 +141,8 @@ if uploaded_files:
                     df_raw = df_raw[df_raw['Depth_Value'] != exact_val]
         except ValueError:
             st.sidebar.error("⚠️ Check format! Examples: 12.4 or 40-45")
-    # ---------------------------------------------------------
 
-    # Explicit list of words to remove from element dropdown lists
+    # Meta column filtering
     meta = ['Reading', 'Type', 'Time', 'Sample', 'Units', 'Sigma', 'CPS', 'Mode', 'Duration', 
             'Main', 'Low', 'High', 'Light', 'User', 'Batch', 'Heat', 'Lot', 'Note', 'Balance', 'Bal',
             'Source_File', 'Sample_ID', 'Depth_Value', 'PC1', 'PC2', 'PC3', 'Cluster_ID', 'Display_Label']
@@ -154,8 +156,6 @@ if uploaded_files:
         elements.remove('Gamma_API')
 
     st.sidebar.subheader("Select Features:")
-    
-    # --- ALL THREE CROSS-FORMATION RATIOS PRE-LOADED ---
     starting_features = ['Al', 'Ca', 'Fe', 'K', 'Zr', 'Ratio_K_Zr', 'Ratio_Ca_Fe', 'Ratio_Sr_Cr']
     
     selected_elements = st.sidebar.multiselect(
@@ -164,20 +164,32 @@ if uploaded_files:
         default=[e for e in starting_features if e in elements]
     )
 
+    # ---------------------------------------------------------
+    # 🧪 LOG-NORMAL & PREPROCESSING PIPELINE
+    # ---------------------------------------------------------
+    st.sidebar.subheader("🧪 Scaling Pipeline")
+    use_log10 = st.sidebar.checkbox("Apply Log10(x + 1) Transformation", value=True, help="Normalizes log-normal trace distributions and handles 0 values cleanly.")
+
     if len(selected_elements) >= 3:
         X_num = df_raw[selected_elements].apply(pd.to_numeric, errors='coerce').fillna(0).copy()
         
-        # --- ROBUST IQR DATA SCRUBBING ---
+        # 1. Log10(x + 1) transformation
+        if use_log10:
+            X_log = np.log10(X_num + 1)
+        else:
+            X_log = X_num
+
+        # 2. Data Cleaning on Log-Transformed Space
         st.sidebar.subheader("🧼 Data Cleaning")
         outlier_multiplier = st.sidebar.slider("Outlier Scrub (IQR Multiplier):", 1.5, 10.0, 4.0)
         
         scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X_num)
+        X_scaled = scaler.fit_transform(X_log)
         
         pca_obj = PCA(n_components=3, random_state=42)
         pca_scores = pca_obj.fit_transform(X_scaled)
         
-        # Calculate bounds along the dominant PC1 axis using robust median & IQR
+        # Calculate bounds along PC1 axis
         pc1_scores = pca_scores[:, 0]
         q25, q75 = np.percentile(pc1_scores, [25, 75])
         iqr = q75 - q25
@@ -190,7 +202,6 @@ if uploaded_files:
         df = df_raw.loc[mask].copy() 
         final_pca_scores = pca_scores[mask]
         df[['PC1', 'PC2', 'PC3']] = final_pca_scores
-        # ---------------------------------
 
         formation_options = ["Unassigned", "Beaver Dam", "Choptank", "Calvert"]
 
@@ -206,17 +217,21 @@ if uploaded_files:
             
             if st.sidebar.button("🧠 Train/Overwrite Master AI"):
                 model = RandomForestClassifier(n_estimators=250, random_state=42)
+                # Fit model on the log-transformed + scaled features
                 model.fit(X_scaled[mask], df['Display_Label'])
                 with open(model_path, "wb") as f:
-                    pickle.dump((model, scaler, selected_elements), f)
+                    pickle.dump((model, scaler, selected_elements, use_log10), f)
                 st.rerun()
 
         else:
             if os.path.exists(model_path):
                 with open(model_path, "rb") as f:
-                    model, saved_scaler, saved_elements = pickle.load(f)
+                    model, saved_scaler, saved_elements, saved_use_log10 = pickle.load(f)
                 
                 X_pred = df[saved_elements].apply(pd.to_numeric, errors='coerce').fillna(0)
+                if saved_use_log10:
+                    X_pred = np.log10(X_pred + 1)
+                    
                 X_pred_scaled = saved_scaler.transform(X_pred)
                 df['Display_Label'] = model.predict(X_pred_scaled)
             else:
