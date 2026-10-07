@@ -1,3 +1,8 @@
+Got it—reverting back to the working version prior to introducing the element symbol checks and auto-pruning.
+
+Here is the code restored to its previous state:
+
+Python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,17 +14,6 @@ import plotly.graph_objects as go
 
 # --- PAGE CONFIG ---
 st.set_page_config(layout="wide", page_title="XRF Stratigraphy & Exploration")
-
-# Valid Periodic Table symbols (strictly chemical elements only)
-PERIODIC_TABLE = {
-    'H', 'HE', 'LI', 'BE', 'B', 'C', 'N', 'O', 'F', 'NE', 'NA', 'MG', 'AL', 'SI', 
-    'P', 'S', 'CL', 'AR', 'K', 'CA', 'SC', 'TI', 'V', 'CR', 'MN', 'FE', 'CO', 'NI', 
-    'CU', 'ZN', 'GA', 'GE', 'AS', 'SE', 'BR', 'KR', 'RB', 'SR', 'Y', 'ZR', 'NB', 
-    'MO', 'TC', 'RU', 'RH', 'PD', 'AG', 'CD', 'IN', 'SN', 'SB', 'TE', 'I', 'XE', 
-    'CS', 'BA', 'LA', 'CE', 'PR', 'ND', 'PM', 'SM', 'EU', 'GD', 'TB', 'DY', 'HO', 
-    'ER', 'TM', 'YB', 'LU', 'HF', 'TA', 'W', 'RE', 'OS', 'IR', 'PT', 'AU', 'HG', 
-    'TL', 'PB', 'BI', 'PO', 'AT', 'RN', 'FR', 'RA', 'AC', 'TH', 'PA', 'U'
-}
 
 # --- COLOR MAP ---
 COLOR_DISCRETE_MAP = {
@@ -161,36 +155,12 @@ if uploaded_files:
         except ValueError:
             st.sidebar.error("Check format! Examples: 12.4 or 40-45")
 
-    # --- FILTER FOR ONLY TRUE CHEMICAL ELEMENTS AND RATIOS ---
-    all_element_cols = []
-    for col in df_raw.columns:
-        # Keep custom geochemical ratios
-        if col.startswith("Ratio_"):
-            all_element_cols.append(col)
-            continue
-            
-        # Ignore columns containing metadata keywords like Sigma, LOD, CPS, Reading, etc.
-        col_upper = col.upper()
-        if any(meta in col_upper for meta in ['SIGMA', 'LOD', 'CPS', 'READING', 'DURATION', 'SAMPLE', 'DEPTH', 'MAIN', 'LOW', 'HIGH', 'UNITS']):
-            continue
-
-        # Check if the column is a periodic element symbol
-        if col.strip().upper() in PERIODIC_TABLE:
-            all_element_cols.append(col)
-
-    # Pre-select element columns that have real measurements (>0) AND actual variation (>1 unique value)
-    valid_elements = []
-    for col in all_element_cols:
-        s = pd.to_numeric(df_raw[col], errors='coerce').dropna()
-        if (s > 0).any() and s.nunique() > 1:
-            valid_elements.append(col)
+    # --- ELEMENT SELECTOR ---
+    meta_cols = {'Source_File', 'Sample_ID', 'Depth_Value', 'Gamma_API'}
+    numeric_cols = [c for c in df_raw.select_dtypes(include=[np.number]).columns if c not in meta_cols]
 
     st.sidebar.subheader("Select Elements / Ratios:")
-    selected_elements = st.sidebar.multiselect(
-        "", 
-        options=all_element_cols,    # All actual chemical element columns from your CSV
-        default=valid_elements       # Only populated elements checked on startup
-    )
+    selected_elements = st.sidebar.multiselect("", options=numeric_cols, default=numeric_cols)
 
     # --- TRANSFORMATION PIPELINE ---
     st.sidebar.subheader("Scaling Pipeline")
