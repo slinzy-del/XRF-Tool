@@ -10,6 +10,20 @@ import plotly.graph_objects as go
 # --- PAGE CONFIG ---
 st.set_page_config(layout="wide", page_title="XRF Stratigraphy & Exploration")
 
+# Standard Chemical Elements set (Symbols and standard capitalization)
+VALID_ELEMENTS = {
+    'H', 'HE', 'LI', 'BE', 'B', 'C', 'N', 'O', 'F', 'NE', 'NA', 'MG', 'AL', 'SI', 
+    'P', 'S', 'CL', 'AR', 'K', 'CA', 'SC', 'TI', 'V', 'CR', 'MN', 'FE', 'CO', 'NI', 
+    'CU', 'ZN', 'GA', 'GE', 'AS', 'SE', 'BR', 'KR', 'RB', 'SR', 'Y', 'ZR', 'NB', 
+    'MO', 'TC', 'RU', 'RH', 'PD', 'AG', 'CD', 'IN', 'SN', 'SB', 'TE', 'I', 'XE', 
+    'CS', 'BA', 'LA', 'CE', 'PR', 'ND', 'PM', 'SM', 'EU', 'GD', 'TB', 'DY', 'HO', 
+    'ER', 'TM', 'YB', 'LU', 'HF', 'TA', 'W', 'RE', 'OS', 'IR', 'PT', 'AU', 'HG', 
+    'TL', 'PB', 'BI', 'PO', 'AT', 'RN', 'FR', 'RA', 'AC', 'TH', 'PA', 'U',
+    # Full names for common XRF outputs
+    'SILICON', 'ALUMINUM', 'IRON', 'CALCIUM', 'POTASSIUM', 'TITANIUM', 'MAGNESIUM',
+    'ZIRCONIUM', 'STRONTIUM', 'RUBIDIUM', 'MANGANESE', 'CHROMIUM', 'SULFUR', 'PHOSPHORUS'
+}
+
 # --- COLOR MAP ---
 COLOR_DISCRETE_MAP = {
     "Beaver Dam": "#636EFA",
@@ -150,23 +164,19 @@ if uploaded_files:
         except ValueError:
             st.sidebar.error("Check format! Examples: 12.4 or 40-45")
 
-    meta = ['Reading', 'Type', 'Time', 'Sample', 'Units', 'Sigma', 'CPS', 'Mode', 'Duration', 
-            'Main', 'Low', 'High', 'Light', 'User', 'Batch', 'Heat', 'Lot', 'Note', 'Balance', 'Bal',
-            'Source_File', 'Sample_ID', 'Depth_Value', 'PC1', 'PC2', 'PC3', 'Cluster_ID', 'Display_Label']
-    
-    all_columns = [c for c in df_raw.columns if not any(k.upper() in c.upper() for k in meta) 
-                   and "2-Sigma" not in c and "Unnamed" not in c]
-    
-    if len(gamma_data_map) > 0 and 'Gamma_API' in df_raw.columns:
-        all_columns = sorted(list(set(all_columns + ['Gamma_API'])))
+    # --- FILTER FOR ONLY VALID ELEMENTS PRESENT IN DATA ---
+    detected_elements = []
+    for col in df_raw.columns:
+        # Normalize column header (strip out unit tags like "Fe (ppm)" or "Ca_%" if present)
+        clean_col = col.split(' ')[0].split('_')[0].strip().upper()
+        if clean_col in VALID_ELEMENTS:
+            detected_elements.append(col)
 
-    default_elements = [c for c in all_columns if not c.startswith('Ratio_')]
-
-    st.sidebar.subheader("Select Features:")
+    st.sidebar.subheader("Select Elements:")
     selected_elements = st.sidebar.multiselect(
         "", 
-        options=all_columns, 
-        default=default_elements
+        options=detected_elements, 
+        default=detected_elements
     )
 
     # --- TRANSFORMATION PIPELINE ---
@@ -280,6 +290,9 @@ if uploaded_files:
                 xaxis=dict(tickangle=-45)
             )
             st.plotly_chart(fig_corr, use_container_width=True)
+
+    else:
+        st.warning("Please select at least 3 elements from the sidebar to perform PCA and clustering.")
 
 else:
     st.info("Please upload XRF CSV file(s) from the sidebar to begin analysis.")
