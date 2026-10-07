@@ -259,18 +259,9 @@ if uploaded_files:
             st.download_button("Export Core Log CSV", df.to_csv(index=False), "xrf_strat_results.csv")
 
         with tab3:
-            st.subheader("3. Multi-Element Correlation Matrix")
+            st.subheader("3. Multi-Element Correlation Matrix (Spearman Rank)")
             
-            corr_method = st.radio(
-                "Correlation Metric:", 
-                ["Pearson (Linear)", "Spearman (Rank-based)"], 
-                horizontal=True,
-                help="Spearman is robust against extreme outliers; Pearson measures direct linear relationships."
-            )
-            
-            method_key = 'pearson' if "Pearson" in corr_method else 'spearman'
-            
-            corr_matrix = df[selected_elements].apply(pd.to_numeric, errors='coerce').corr(method=method_key)
+            corr_matrix = df[selected_elements].apply(pd.to_numeric, errors='coerce').corr(method='spearman')
 
             fig_corr = px.imshow(
                 corr_matrix,
@@ -285,7 +276,7 @@ if uploaded_files:
                 text_auto=".2f"
             )
             fig_corr.update_layout(
-                title=f"Multi-Element {corr_method.split()[0]} Correlation Matrix",
+                title="Multi-Element Spearman Correlation Matrix",
                 xaxis=dict(tickangle=-45)
             )
             st.plotly_chart(fig_corr, use_container_width=True)
