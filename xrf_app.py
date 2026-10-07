@@ -150,31 +150,18 @@ if uploaded_files:
         except ValueError:
             st.sidebar.error("Check format! Examples: 12.4 or 40-45")
 
-    # --- ELEMENT SELECTOR (IGNORES METADATA SUFFIXES & NOISE) ---
+    # Metadata columns to exclude from element dropdown
     meta_cols = {'Source_File', 'Sample_ID', 'Depth_Value', 'Gamma_API'}
-    
-    # 1. Grab numeric columns but EXCLUDE machine noise (Sigma, LOD, CPS, Reading, etc.)
-    element_options = []
-    for c in df_raw.select_dtypes(include=[np.number]).columns:
-        if c in meta_cols:
-            continue
-        c_upper = c.upper()
-        if any(noise in c_upper for noise in ['SIGMA', 'LOD', 'CPS', 'READING', 'DURATION', 'MAIN', 'LOW', 'HIGH', 'UNITS']):
-            continue
-        element_options.append(c)
-
-    # 2. Find elements that actually have varying data (>0 and >1 unique value)
-    default_selected = []
-    for col in element_options:
-        s = pd.to_numeric(df_raw[col], errors='coerce').dropna()
-        if (s > 0).any() and s.nunique() > 1:
-            default_selected.append(col)
+    numeric_cols = [
+        c for c in df_raw.select_dtypes(include=[np.number]).columns 
+        if c not in meta_cols
+    ]
 
     st.sidebar.subheader("Select Elements / Ratios:")
     selected_elements = st.sidebar.multiselect(
         "", 
-        options=element_options,      # Only clean element/ratio columns
-        default=default_selected      # Blank elements toggled OFF by default
+        options=numeric_cols, 
+        default=numeric_cols
     )
 
     # --- TRANSFORMATION PIPELINE ---
