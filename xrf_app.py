@@ -155,15 +155,21 @@ if uploaded_files:
             'Main', 'Low', 'High', 'Light', 'User', 'Batch', 'Heat', 'Lot', 'Note', 'Balance', 'Bal',
             'Source_File', 'Sample_ID', 'Depth_Value', 'PC1', 'PC2', 'PC3', 'Cluster_ID', 'Display_Label']
     
-    elements = [c for c in df_raw.columns if not any(k.upper() in c.upper() for k in meta) 
-                and "2-Sigma" not in c and "Unnamed" not in c]
+    all_columns = [c for c in df_raw.columns if not any(k.upper() in c.upper() for k in meta) 
+                   and "2-Sigma" not in c and "Unnamed" not in c]
     
     if len(gamma_data_map) > 0 and 'Gamma_API' in df_raw.columns:
-        elements = sorted(list(set(elements + ['Gamma_API'])))
+        all_columns = sorted(list(set(all_columns + ['Gamma_API'])))
+
+    # Select ALL elements by default, but exclude 'Ratio_' columns from default selection
+    default_elements = [c for c in all_columns if not c.startswith('Ratio_')]
 
     st.sidebar.subheader("Select Features:")
-    starting_features = ['Al', 'Ca', 'Fe', 'K', 'Zr', 'Ratio_K_Zr', 'Ratio_Ca_Fe', 'Ratio_Sr_Cr']
-    selected_elements = st.sidebar.multiselect("", elements, default=[e for e in starting_features if e in elements])
+    selected_elements = st.sidebar.multiselect(
+        "", 
+        options=all_columns, 
+        default=default_elements
+    )
 
     # --- TRANSFORMATION PIPELINE ---
     st.sidebar.subheader("🧪 Scaling Pipeline")
