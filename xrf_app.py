@@ -1,3 +1,6 @@
+Here is the complete xrf_app.py script with all emojis removed and clean, professional labeling throughout:
+
+Python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -64,7 +67,7 @@ def create_pca_biplot(df, pca_obj, features, color_col):
     return fig
 
 # --- DATA LOADING ---
-st.sidebar.title("🛠️ Project Controls")
+st.sidebar.title("Project Controls")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -74,7 +77,7 @@ with col2:
 
 gamma_data_map = {}
 if uploaded_txt_gamma:
-    st.toast(f"📚 Syncing {len(uploaded_txt_gamma)} Gamma TXT log files...")
+    st.toast(f"Syncing {len(uploaded_txt_gamma)} Gamma TXT log files...")
     for txt_file in uploaded_txt_gamma:
         try:
             g_df = pd.read_csv(txt_file, sep=r'\s+', engine='python', skiprows=1, header=None, usecols=[0, 1], names=['Depth', 'Gamma'])
@@ -136,7 +139,7 @@ if uploaded_files:
 
     # --- CORE DATA PRUNING ---
     st.sidebar.markdown("---")
-    st.sidebar.subheader("✂️ Core Data Pruning")
+    st.sidebar.subheader("Core Data Pruning")
     manual_exclude_input = st.sidebar.text_input("Exclude Depths (e.g., 10.5, 40-45):", value="")
     if manual_exclude_input.strip():
         try:
@@ -170,7 +173,7 @@ if uploaded_files:
     )
 
     # --- TRANSFORMATION PIPELINE ---
-    st.sidebar.subheader("🧪 Scaling Pipeline")
+    st.sidebar.subheader("Scaling Pipeline")
     use_clr = st.sidebar.checkbox("Use CLR (Centered Log-Ratio)", value=True, help="Recommended for XRF compositional data.")
     outlier_multiplier = st.sidebar.slider("Outlier Scrub (IQR Multiplier):", 1.5, 10.0, 4.0)
 
@@ -213,7 +216,11 @@ if uploaded_files:
         df['Display_Label'] = df['Cluster_ID'].map(lambda x: label_map[x] if label_map[x] != "Unassigned" else f"Cluster {x}")
 
         # --- TABS ---
-        tab1, tab2, tab3 = st.tabs(["🌌 PCA Space & Drivers", "📉 Down-Core Stratigraphy", "🔥 Geochemical Heatmaps"])
+        tab1, tab2, tab3 = st.tabs([
+            "PCA Space & Drivers", 
+            "Chemostratigraphy (K-Means)", 
+            "Element Correlation Heatmap"
+        ])
 
         with tab1:
             st.subheader("1. Principal Component Analysis (Diagnostic View)")
@@ -240,7 +247,7 @@ if uploaded_files:
                 st.plotly_chart(fig_load, use_container_width=True)
 
         with tab2:
-            st.subheader("2. Chemostratigraphic Core Log")
+            st.subheader("2. Chemostratigraphic Core Log (K-Means Clustered)")
             fig_strat = px.scatter(
                 df, x='Source_File', y='Depth_Value',
                 color='Display_Label',
@@ -252,45 +259,40 @@ if uploaded_files:
             fig_strat.update_yaxes(autorange="reversed", title="Depth (ft)")
             fig_strat.update_xaxes(type='category', title="Borehole ID")
             st.plotly_chart(fig_strat, use_container_width=True)
-            st.download_button("💾 Export Core Log CSV", df.to_csv(index=False), "xrf_strat_results.csv")
+            st.download_button("Export Core Log CSV", df.to_csv(index=False), "xrf_strat_results.csv")
 
         with tab3:
-            st.subheader("3. Geochemical Fingerprints & Element Correlations")
-            heatmap_mode = st.radio("Select Heatmap View:", ["Cluster Profiles (Median Z-Score)", "Element Correlation Matrix"], horizontal=True)
+            st.subheader("3. Multi-Element Correlation Matrix")
+            
+            corr_method = st.radio(
+                "Correlation Metric:", 
+                ["Pearson (Linear)", "Spearman (Rank-based)"], 
+                horizontal=True,
+                help="Spearman is robust against extreme outliers; Pearson measures direct linear relationships."
+            )
+            
+            method_key = 'pearson' if "Pearson" in corr_method else 'spearman'
+            
+            # Compute element-vs-element correlation matrix
+            corr_matrix = df[selected_elements].apply(pd.to_numeric, errors='coerce').corr(method=method_key)
 
-            if heatmap_mode == "Cluster Profiles (Median Z-Score)":
-                X_z = pd.DataFrame(X_scaled, columns=selected_elements, index=df.index)
-                X_z['Cluster'] = df['Display_Label']
-                cluster_profile = X_z.groupby('Cluster').median()
-
-                fig_hm = px.imshow(
-                    cluster_profile,
-                    labels=dict(x="Element / Feature", y="Formation / Cluster", color="Standardized Score"),
-                    x=cluster_profile.columns,
-                    y=cluster_profile.index,
-                    color_continuous_scale="RdBu_r",
-                    aspect="auto",
-                    height=450,
-                    text_auto=".2f"
-                )
-                fig_hm.update_layout(title="Cluster Fingerprints (Red = Enriched, Blue = Depleted)")
-                st.plotly_chart(fig_hm, use_container_width=True)
-
-            else:
-                corr_matrix = df[selected_elements].apply(pd.to_numeric, errors='coerce').corr()
-                fig_corr = px.imshow(
-                    corr_matrix,
-                    labels=dict(color="Correlation"),
-                    x=corr_matrix.columns,
-                    y=corr_matrix.columns,
-                    color_continuous_scale="Viridis",
-                    zmin=-1, zmax=1,
-                    aspect="auto",
-                    height=600,
-                    text_auto=".2f"
-                )
-                fig_corr.update_layout(title="Multi-Element Pearson Correlation Matrix")
-                st.plotly_chart(fig_corr, use_container_width=True)
+            fig_corr = px.imshow(
+                corr_matrix,
+                labels=dict(x="Element / Feature", y="Element / Feature", color="Correlation (r)"),
+                x=corr_matrix.columns,
+                y=corr_matrix.columns,
+                color_continuous_scale="RdBu_r",
+                zmin=-1, 
+                zmax=1,
+                aspect="auto",
+                height=700,
+                text_auto=".2f"
+            )
+            fig_corr.update_layout(
+                title=f"Multi-Element {corr_method.split()[0]} Correlation Matrix",
+                xaxis=dict(tickangle=-45)
+            )
+            st.plotly_chart(fig_corr, use_container_width=True)
 
 else:
     st.info("Please upload XRF CSV file(s) from the sidebar to begin analysis.")
