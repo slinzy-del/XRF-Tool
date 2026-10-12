@@ -160,7 +160,12 @@ if uploaded_files:
     if len(gamma_data_map) > 0 and 'Gamma_API' in df_raw.columns:
         all_columns = sorted(list(set(all_columns + ['Gamma_API'])))
 
-    default_elements = [c for c in all_columns if not c.startswith('Ratio_')]
+    # Only pre-select these specific elements on startup
+    target_elements = ['Ag', 'Al', 'Ba', 'Ca', 'Cr', 'Cu', 'Fe', 'K', 'Mg', 'Mn', 
+                       'Nb', 'Ni', 'P', 'Pb', 'Rb', 'S', 'Si', 'Sr', 'Th', 'Ti', 
+                       'U', 'V', 'Y', 'Zn', 'Zr']
+    
+    default_elements = [c for c in all_columns if c in target_elements]
 
     st.sidebar.subheader("Select Features:")
     selected_elements = st.sidebar.multiselect(
